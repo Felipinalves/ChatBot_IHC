@@ -23,7 +23,7 @@ def initialize_system():
         )
         Settings.llm = None  # Desliga o LLM interno da LlamaIndex (não será usado aqui)
 
-        persist_dir = "db_ihc_enhanced"
+        persist_dir = "db_chroma"
 
         # Verifica se a pasta do índice já existe e tem conteúdo
         if not os.path.exists(persist_dir) or not os.listdir(persist_dir):
