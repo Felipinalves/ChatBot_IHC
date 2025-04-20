@@ -1,17 +1,16 @@
 import os
 import streamlit as st
 import chromadb
-import re
 from llama_index.core import (
     VectorStoreIndex,
     SimpleDirectoryReader,
     StorageContext,
     Settings,
+    load_index_from_storage
 )
 from llama_index.core.node_parser import SentenceSplitter
-from llama_index.vector_stores.chroma.base import ChromaVectorStore
+from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-
 
 @st.cache_resource(show_spinner=True)
 def initialize_system():
@@ -27,6 +26,8 @@ def initialize_system():
 
         # Verifica se a pasta do índice já existe e tem conteúdo
         if not os.path.exists(persist_dir) or not os.listdir(persist_dir):
+            st.warning("Gerando índice pela primeira vez... Isso pode levar alguns minutos.")
+
             # Carregar documentos .txt com metadados
             documents = SimpleDirectoryReader(
                 input_dir="./arquivosFormatados",
@@ -49,19 +50,15 @@ def initialize_system():
             storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
             # Criar e salvar índice
-            index = VectorStoreIndex(all_nodes, storage_context=storage_context, show_progress=True)
-            index.storage_context.persist(persist_dir=persist_dir)
+            index = VectorStoreIndex(all_nodes, storage_context=storage_context)
+            storage_context.persist(persist_dir=persist_dir)
         else:
             # Carregar índice já existente
-            chroma_client = chromadb.PersistentClient(path=persist_dir)
-            chroma_collection = chroma_client.get_or_create_collection(name="docs_ihc")
-            vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
             storage_context = StorageContext.from_defaults(persist_dir=persist_dir)
-            index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage_context)
+            index = load_index_from_storage(storage_context)
 
         return index.as_retriever(similarity_top_k=10)
 
     except Exception as e:
         st.error(f"Erro ao inicializar o sistema de RAG: {str(e)}")
         return None
-
