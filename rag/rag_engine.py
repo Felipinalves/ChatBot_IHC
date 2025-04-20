@@ -23,7 +23,7 @@ def initialize_system():
         )
         Settings.llm = None  # Desliga o LLM interno da LlamaIndex (não será usado aqui)
 
-        persist_dir = "db_chroma"
+        persist_dir = "db_ihc"
 
         # Verifica se a pasta do índice já existe e tem conteúdo
         if not os.path.exists(persist_dir) or not os.listdir(persist_dir):
@@ -46,7 +46,7 @@ def initialize_system():
 
             # Criar armazenamento com ChromaDB
             chroma_client = chromadb.PersistentClient(path=persist_dir)
-            chroma_collection = chroma_client.get_or_create_collection(name="ihc_docs")
+            chroma_collection = chroma_client.get_or_create_collection(name="docs_ihc")
             vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
             storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
