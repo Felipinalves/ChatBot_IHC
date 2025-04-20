@@ -8,6 +8,8 @@ pyrebase4
 
 # --- RAG e embeddings ---
 llama-index>=0.10.28         # Garante acesso ao SentenceSplitter e outras melhorias
+llama-index-vector-stores-chroma
+llama-index-embeddings-huggingface
 chromadb>=0.4.24             # Compatível com persistência e HNSW config
 sentence-transformers>=2.2.2 # Modelo HuggingFace usado nos embeddings
 nltk>=3.8.1
