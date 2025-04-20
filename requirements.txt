@@ -12,6 +12,7 @@ chromadb>=0.4.24             # Compatível com persistência e HNSW config
 sentence-transformers>=2.2.2 # Modelo HuggingFace usado nos embeddings
 nltk>=3.8.1
 spacy>=3.7.2
+sentence-splitter
 
 # --- LLM: Google Gemini ---
 google-generativeai>=0.3.2   # Usado para chamar o Gemini 
