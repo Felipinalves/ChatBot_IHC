@@ -5,6 +5,8 @@ from llama_index.vector_stores.chroma.base import ChromaVectorStore
 from llama_index.core import StorageContext, Settings
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 import streamlit as st
+import nltk
+import spacy
 
 # Download dos recursos do NLTK
 try:
