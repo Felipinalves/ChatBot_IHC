@@ -20,6 +20,14 @@ import schedule
 import time
 import threading
 from datetime import datetime
+import os
+
+# Defina o diretório de cache para o tiktoken
+os.environ["TIKTOKEN_CACHE_DIR"] = "/tmp/tiktoken_cache"
+
+# Crie o diretório se ele não existir
+os.makedirs("/tmp/tiktoken_cache", exist_ok=True)
+
 
 # Função para executar limpeza em segundo plano
 def run_scheduled_cleanup(firestore_db):
