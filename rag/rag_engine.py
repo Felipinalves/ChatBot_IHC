@@ -5,10 +5,10 @@ import chromadb
 from llama_index.core import (
     VectorStoreIndex,
     SimpleDirectoryReader,
-    SentenceSplitter,
     StorageContext,
     Settings,
 )
+from llama_index.core.node_parser import SentenceSplitter
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
