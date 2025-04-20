@@ -1,7 +1,7 @@
 import os
 import streamlit as st
 import chromadb
-
+import re
 from llama_index.core import (
     VectorStoreIndex,
     SimpleDirectoryReader,
