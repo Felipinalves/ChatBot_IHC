@@ -6,6 +6,17 @@ from llama_index.core import StorageContext, Settings
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 import streamlit as st
 
+# Download dos recursos do NLTK
+try:
+    nltk.data.find('corpora/stopwords')
+except LookupError:
+    nltk.download('stopwords', quiet=True)
+
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt', quiet=True)
+
 @st.cache_resource(show_spinner=False)
 def initialize_system():
     try:
