@@ -246,10 +246,9 @@ def list_user_chats_from_firestore(firestore_db, user_id):
     chats = {}
     
     # Consultar chats do usuário
-    chat_refs = firestore_db.collection("chats") \
-              .filter(field="user_id", op="==", value=user_id) \
-              .order_by("updated_at", direction="DESCENDING") \
-              .stream()
+    chat_query = firestore_db.collection("chats").where("user_id", "==", user_id)
+    chat_query = chat_query.order_by("updated_at", direction="DESCENDING")
+    chat_refs = chat_query.stream()
     
     # Converter para dicionário
     for chat in chat_refs:
