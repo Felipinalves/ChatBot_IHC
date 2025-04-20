@@ -27,11 +27,10 @@ def initialize_system():
 
         # Verifica se a pasta do índice já existe e tem conteúdo
         if not os.path.exists(persist_dir) or not os.listdir(persist_dir):
-            st.warning("Gerando índice pela primeira vez... Isso pode levar alguns minutos.")
 
             # Carregar documentos .txt com metadados
             documents = SimpleDirectoryReader(
-                input_dir="../arquivosFormatados",
+                input_dir="./arquivosFormatados",
                 file_metadata=lambda x: {
                     "file_name": os.path.basename(x),
                     "file_path": x
