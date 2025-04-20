@@ -2,6 +2,7 @@
 streamlit>=1.30.0
 google-cloud-firestore>=2.11.0
 schedule>=1.2.0
+pysqlite3-binary
 
 # --- RAG e embeddings ---
 llama-index>=0.10.28         # Garante acesso ao SentenceSplitter e outras melhorias
