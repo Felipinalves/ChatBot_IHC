@@ -13,6 +13,7 @@ llama-index-embeddings-huggingface
 chromadb>=0.4.24             # Compatível com persistência e HNSW config
 sentence-transformers>=2.2.2 # Modelo HuggingFace usado nos embeddings
 nltk>=3.8.1
+tiktoken
 spacy>=3.7.2
 sentence-splitter
 hf_xet
