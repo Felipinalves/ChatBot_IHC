@@ -31,7 +31,7 @@ def initialize_system():
 
             # Carregar documentos .txt com metadados
             documents = SimpleDirectoryReader(
-                input_dir="./arquivosFormatados",
+                input_dir="../arquivosFormatados",
                 file_metadata=lambda x: {
                     "file_name": os.path.basename(x),
                     "file_path": x
