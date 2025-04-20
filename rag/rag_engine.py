@@ -51,7 +51,7 @@ def initialize_system():
             storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
             # Criar e salvar índice
-            index = VectorStoreIndex(all_nodes, storage_context=storage_context)
+            index = VectorStoreIndex(all_nodes, storage_context=storage_context, show_progress=True)
             index.storage_context.persist(persist_dir=persist_dir)
 
         # Carregar índice já existente
