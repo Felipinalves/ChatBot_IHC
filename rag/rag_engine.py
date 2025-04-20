@@ -19,13 +19,6 @@ try:
 except LookupError:
     nltk.download('punkt', quiet=True)
 
-try:
-    spacy.load('pt_core_news_sm')
-except OSError:
-    from spacy.cli import download
-    download('pt_core_news_sm')
-    spacy.load('pt_core_news_sm')
-
 @st.cache_resource(show_spinner=False)
 def initialize_system():
     try:
