@@ -21,6 +21,18 @@ import time
 import threading
 from datetime import datetime
 import os
+import nltk
+
+# Defina o diretório de cache para o NLTK
+nltk_data_dir = "/tmp/nltk_data"
+os.makedirs(nltk_data_dir, exist_ok=True)
+nltk.data.path.append(nltk_data_dir)
+
+# Baixe o recurso 'stopwords' se ainda não estiver disponível
+try:
+    nltk.corpus.stopwords.words("portuguese")
+except LookupError:
+    nltk.download("stopwords", download_dir=nltk_data_dir)
 
 # Defina o diretório de cache para o tiktoken
 os.environ["TIKTOKEN_CACHE_DIR"] = "/tmp/tiktoken_cache"
