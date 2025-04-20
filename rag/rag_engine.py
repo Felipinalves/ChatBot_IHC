@@ -50,11 +50,17 @@ def initialize_system():
             storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
             # Criar e salvar índice
-            index = VectorStoreIndex(all_nodes, storage_context=storage_context, show_progress=True)
-            index.storage_context.persist(persist_dir=persist_dir)
+            storage_context = StorageContext.from_defaults(persist_dir=persist_dir)
+            index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage_context)
 
-        # Carregar índice já existente
-        index = VectorStoreIndex.from_persist_dir(persist_dir=persist_dir)
+        else:
+            # Carregar índice já existente
+            chroma_client = chromadb.PersistentClient(path=persist_dir)
+            chroma_collection = chroma_client.get_or_create_collection(name="docs_ihc")
+            vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+            storage_context = StorageContext.from_defaults(persist_dir=persist_dir)
+            index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage_context)
+
         return index.as_retriever(similarity_top_k=10)
 
     except Exception as e:
