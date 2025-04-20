@@ -1,24 +1,17 @@
-nltk
-streamlit>=1.42.0
-pysqlite3-binary
-chromadb>=0.6.3
-llama-index>=0.12.19
-llama-index-core
-llama-index-vector-stores-chroma
-llama-index-embeddings-huggingface
-google-generativeai
-sentence-transformers
-torch>=2.1.0
-transformers>=4.36.0
-protobuf>=4.25.1
-nest-asyncio>=1.5.6
-firebase-admin==6.4.0
-pyrebase4
-pytz
-schedule
-spacy
-yake
-numpy
-thinc
-cupy-cuda12x
-hf_xet
+# --- Base da aplicação ---
+streamlit>=1.30.0
+google-cloud-firestore>=2.11.0
+schedule>=1.2.0
+
+# --- RAG e embeddings ---
+llama-index>=0.10.28         # Garante acesso ao SentenceSplitter e outras melhorias
+chromadb>=0.4.24             # Compatível com persistência e HNSW config
+sentence-transformers>=2.2.2 # Modelo HuggingFace usado nos embeddings
+nltk>=3.8.1
+spacy>=3.7.2
+
+# --- LLM: Google Gemini ---
+google-generativeai>=0.3.2   # Usado para chamar o Gemini 
+
+# --- Outros ---
+protobuf<4.0.0               # Evita conflitos com Google API
