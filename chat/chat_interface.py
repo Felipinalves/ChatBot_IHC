@@ -1,3 +1,4 @@
+import re
 import streamlit as st
 from utils.time_utils import get_brasilia_time
 from datetime import datetime, timedelta
