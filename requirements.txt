@@ -21,3 +21,4 @@ yake
 numpy
 thinc
 cupy-cuda12x
+hf_xet
