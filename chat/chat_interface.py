@@ -55,17 +55,36 @@ def show_chat_interface(query_engine, firestore_db, chat_id, messages):
         with st.status("Processando sua pergunta...", expanded=True) as status:
             st.write("Buscando informações relevantes...")
             
-             # Recuperar nós relevantes
-            retrieved_nodes = query_engine.retrieve(prompt)
-            
-            # Filtrar e ordenar nós
+            # Verifica se o usuário especificou um artigo: 'nome.txt'
+            file_match = re.search(r"artigo:\s*[\"'](.+?\.txt)[\"']", prompt, re.IGNORECASE)
+        
+            if file_match:
+                file_name_filter = file_match.group(1)
+        
+                # Obter todos os nós do índice (baseados no docstore interno)
+                all_nodes = query_engine._index.docstore.get_all_nodes()
+                
+                # Filtrar nós que pertencem ao arquivo citado
+                nodes_from_file = [
+                    node for node in all_nodes
+                    if file_name_filter.lower() in node.metadata.get("file_name", "").lower()
+                ]
+        
+                # Criar um retriever personalizado só com os chunks do arquivo citado
+                custom_retriever = VectorStoreIndex(nodes_from_file).as_retriever(similarity_top_k=10)
+                retrieved_nodes = custom_retriever.retrieve(prompt)
+            else:
+                # Caso nenhum artigo específico tenha sido citado, busca geral
+                retrieved_nodes = query_engine.retrieve(prompt)
+        
+            # Filtrar e ordenar nós com bom score
             filtered_nodes = sorted(
                 [n for n in retrieved_nodes if n.score >= 0.6],
                 key=lambda x: x.score,
                 reverse=True
-            )[:7]  # Pegar top 7 chunks
-
-            # Construir contexto com metadados
+            )[:7]  # Pega os 7 chunks mais relevantes
+        
+            # Construir o contexto para o prompt
             context = "\n\n".join(
                 f"📄 Fonte: {n.metadata.get('file_name', 'Desconhecida')}\n"
                 f"📊 Score: {n.score:.2f}\n"
@@ -76,24 +95,24 @@ def show_chat_interface(query_engine, firestore_db, chat_id, messages):
             st.write("Gerando resposta...")
             full_prompt = f"""Você é um especialista em IHC (Interação Humano-Computador) com vasta experiência acadêmica e prática.
 
-[INSTRUÇÕES]
-1. Analise cuidadosamente a pergunta e o contexto fornecido.
-2. Se o contexto contiver informações relevantes para a pergunta, baseie sua resposta principalmente nessas informações.
-3. Se o contexto for insuficiente ou não abordar diretamente a pergunta, forneça uma resposta baseada em seu conhecimento geral de IHC, sem mencionar a ausência de informações no contexto.
-4. Não faça referências diretas aos "textos fornecidos" ou "artigos" na sua resposta.
-
-[FORMATO]
-- Use português brasileiro formal
-- Mantenha termos técnicos consolidados em inglês quando apropriado
-- Estruture sua resposta em parágrafos claros e concisos
-- Inclua exemplos práticos quando relevante
-- Apresente diferentes perspectivas quando apropriado
-
-[CONTEXTO]
-{context}
-
-Pergunta: {prompt}
-"""
+            [INSTRUÇÕES]
+            1. Analise cuidadosamente a pergunta e o contexto fornecido.
+            2. Se o contexto contiver informações relevantes para a pergunta, baseie sua resposta principalmente nessas informações.
+            3. Se o contexto for insuficiente ou não abordar diretamente a pergunta, forneça uma resposta baseada em seu conhecimento geral de IHC, sem mencionar a ausência de informações no contexto.
+            4. Não faça referências diretas aos \"textos fornecidos\" ou \"artigos\" na sua resposta.
+            
+            [FORMATO]
+            - Use português brasileiro formal
+            - Mantenha termos técnicos consolidados em inglês quando apropriado
+            - Estruture sua resposta em parágrafos claros e concisos
+            - Inclua exemplos práticos quando relevante
+            - Apresente diferentes perspectivas quando apropriado
+            
+            [CONTEXTO]
+            {context}
+            
+            Pergunta: {prompt}
+            """
             response = generate_response_with_gemini(full_prompt)
             
             if response:
