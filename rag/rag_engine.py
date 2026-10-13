@@ -1,63 +1,98 @@
+import json
 import os
+from dataclasses import dataclass
+
+import numpy as np
 import streamlit as st
-import chromadb
-from llama_index.core import (
-    VectorStoreIndex,
-    SimpleDirectoryReader,
-    StorageContext,
-    Settings,
-    load_index_from_storage
+
+from rag.config import (
+    CHUNKS_FILE,
+    EMBEDDING_MODEL,
+    EMBEDDINGS_FILE,
+    META_FILE,
+    MIN_SCORE,
+    TOP_K,
 )
-from llama_index.core.node_parser import SentenceSplitter
-from llama_index.vector_stores.chroma import ChromaVectorStore
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
-@st.cache_resource(show_spinner=True)
-def initialize_system():
-    try:
-        # Configuração do modelo de embedding
-        Settings.embed_model = HuggingFaceEmbedding(
-            model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
-            normalize=True
-        )
-        Settings.llm = None  # Desliga o LLM interno da LlamaIndex
 
-        persist_dir = "db_ihc"
+@dataclass
+class RetrievedChunk:
+    text: str
+    file_name: str
+    score: float
 
-        # Verifica se a pasta do índice já existe e tem conteúdo
-        #if not os.path.exists(persist_dir) or not os.listdir(persist_dir):
 
-        # Carregar documentos .txt com metadados
-        documents = SimpleDirectoryReader(
-            input_dir="./arquivosFormatados",
-            file_metadata=lambda x: {
-                "file_name": os.path.basename(x),
-                "file_path": x
-            }
-        ).load_data()
+class Retriever:
+    """Busca semântica sobre o índice pré-calculado (rag/index)."""
 
-        # Splitter baseado em sentenças
-        text_splitter = SentenceSplitter(chunk_size=512, chunk_overlap=100)
+    def __init__(self, embeddings, chunks, encode):
+        if len(embeddings) != len(chunks):
+            raise ValueError("Índice inconsistente: número de embeddings e de trechos diferente.")
+        self.embeddings = np.asarray(embeddings, dtype=np.float32)
+        self.chunks = chunks
+        self._encode = encode
+        self.file_names = sorted({c["file_name"] for c in chunks})
 
-        # Quebrar documentos em chunks
-        all_nodes = text_splitter.get_nodes_from_documents(documents)
-
-        # Criar armazenamento com ChromaDB
-        chroma_client = chromadb.PersistentClient(path=persist_dir)
-        chroma_collection = chroma_client.get_or_create_collection(name="docs_ihc")
-        vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
-        storage_context = StorageContext.from_defaults(vector_store=vector_store)
-
-        # Criar e salvar índice
-        index = VectorStoreIndex(all_nodes, storage_context=storage_context)
-        storage_context.persist(persist_dir=persist_dir)
-        #else:
-            # Carregar índice já existente
-         #   storage_context = StorageContext.from_defaults(persist_dir=persist_dir)
-          #  index = load_index_from_storage(storage_context)
-
-        return index.as_retriever(similarity_top_k=10)
-
-    except Exception as e:
-        st.error(f"Erro ao inicializar o sistema de RAG: {str(e)}")
+    def find_file(self, name):
+        """Encontra um artigo do acervo pelo nome (ignorando maiúsculas e a extensão)."""
+        wanted = name.lower().removesuffix(".txt").strip()
+        for file_name in self.file_names:
+            if file_name.lower().removesuffix(".txt") == wanted:
+                return file_name
+        for file_name in self.file_names:
+            if wanted and wanted in file_name.lower():
+                return file_name
         return None
+
+    def retrieve(self, query, top_k=TOP_K, min_score=MIN_SCORE, file_name=None):
+        query_vec = np.asarray(self._encode(query), dtype=np.float32)
+        scores = self.embeddings @ query_vec
+
+        if file_name:
+            mask = np.array([c["file_name"] == file_name for c in self.chunks])
+            scores = np.where(mask, scores, -np.inf)
+
+        top = np.argsort(-scores)[:top_k]
+        return [
+            RetrievedChunk(
+                text=self.chunks[i]["text"],
+                file_name=self.chunks[i]["file_name"],
+                score=float(scores[i]),
+            )
+            for i in top
+            if scores[i] >= min_score
+        ]
+
+
+def load_index():
+    if not (os.path.exists(EMBEDDINGS_FILE) and os.path.exists(CHUNKS_FILE)):
+        raise FileNotFoundError(
+            "Índice não encontrado em rag/index. Gere-o com: python -m rag.build_index"
+        )
+    with open(META_FILE, encoding="utf-8") as f:
+        meta = json.load(f)
+    if meta["embedding_model"] != EMBEDDING_MODEL:
+        raise ValueError(
+            "O índice foi gerado com outro modelo de embeddings. Gere-o novamente com: "
+            "python -m rag.build_index"
+        )
+    with open(CHUNKS_FILE, encoding="utf-8") as f:
+        chunks = json.load(f)
+    return np.load(EMBEDDINGS_FILE), chunks
+
+
+@st.cache_resource(show_spinner="Carregando a base de conhecimento...")
+def initialize_system():
+    """Carrega o índice e o modelo de embeddings uma única vez por servidor."""
+    import torch
+    from sentence_transformers import SentenceTransformer
+
+    # Poucas threads: o Streamlit Community Cloud oferece CPU limitada
+    torch.set_num_threads(2)
+    model = SentenceTransformer(EMBEDDING_MODEL, device="cpu")
+
+    def encode(text):
+        return model.encode(text, normalize_embeddings=True, convert_to_numpy=True)
+
+    embeddings, chunks = load_index()
+    return Retriever(embeddings, chunks, encode)

@@ -1,310 +1,266 @@
 import re
+from datetime import timedelta
+
 import streamlit as st
+
+from rag.gemini_integration import GeminiError, stream_response
 from utils.time_utils import get_brasilia_time
-from datetime import datetime, timedelta
-import google.cloud.firestore as firestore
-from rag.gemini_integration import generate_response_with_gemini
 
-def show_chat_interface(query_engine, firestore_db, chat_id, messages):
-    """Exibe a interface principal do chatbot"""
-    
-    st.title(f"🤖 IAHC ChatBot")
-    st.info("Este chatbot utiliza RAG (Retrieval Augmented Generation) para fornecer respostas precisas sobre IHC.", icon="ℹ️")
-    
-    # Exibir mensagens anteriores
-    for message in messages:
-        with st.chat_message(message["role"]):
-            st.write(message["content"])
-    
-    # Campo de entrada para nova mensagem
-    if prompt := st.chat_input("Faça uma pergunta sobre IHC"):
-        # O chat agora tem mensagens, não é mais temporário
-        if "is_temp_chat" in st.session_state:
-            st.session_state.is_temp_chat = False
-            
-        # Adicionar nova mensagem ao estado
-        new_message = {
-            "role": "user", 
-            "content": prompt,
-            "timestamp": get_brasilia_time(),
-            "saved": False
-        }
-        messages.append(new_message)
-        
-        with st.chat_message("user"):
-            st.write(prompt)
-        
-        # Verificar se é a primeira mensagem do usuário e atualizar o título do chat
-        is_first_message = len([m for m in messages if m["role"] == "user"]) == 1
-        
-        # Atualizar título do chat se for a primeira mensagem
-        if is_first_message and chat_id:
-            # Limitar o tamanho do título para evitar títulos muito longos
-            if len(prompt) > 50:
-                new_chat_title = prompt[:47] + "..."
-            else:
-                new_chat_title = prompt
-                
-            # Atualizar título no Firestore e no estado da sessão
-            chat_ref = firestore_db.collection("chats").document(chat_id)
-            chat_ref.update({"title": new_chat_title})
-            
-            # Atualizar no estado da sessão
-            if "chats" in st.session_state and chat_id in st.session_state.chats:
-                st.session_state.chats[chat_id]["title"] = new_chat_title
-        
-        with st.status("Processando sua pergunta...", expanded=True) as status:
-            st.write("Buscando informações relevantes...")
-            
-            # Verifica se o usuário especificou um artigo: 'nome.txt'
-            file_match = re.search(r"artigo:\s*[\"'](.+?\.txt)[\"']", prompt, re.IGNORECASE)
-        
-            if file_match:
-                file_name_filter = file_match.group(1)
-        
-                # Obter todos os nós do índice (baseados no docstore interno)
-                all_nodes = query_engine._index.docstore.get_all_nodes()
-                
-                # Filtrar nós que pertencem ao arquivo citado
-                nodes_from_file = [
-                    node for node in all_nodes
-                    if file_name_filter.lower() in node.metadata.get("file_name", "").lower()
-                ]
-        
-                # Criar um retriever personalizado só com os chunks do arquivo citado
-                custom_retriever = VectorStoreIndex(nodes_from_file).as_retriever(similarity_top_k=10)
-                retrieved_nodes = custom_retriever.retrieve(prompt)
-            else:
-                # Caso nenhum artigo específico tenha sido citado, busca geral
-                retrieved_nodes = query_engine.retrieve(prompt)
-        
-            # Filtrar e ordenar nós com bom score
-            filtered_nodes = sorted(
-                [n for n in retrieved_nodes if n.score >= 0.6],
-                key=lambda x: x.score,
-                reverse=True
-            )[:7]  # Pega os 7 chunks mais relevantes
-        
-            # Construir o contexto para o prompt
-            context = "\n\n".join(
-                f"📄 Fonte: {n.metadata.get('file_name', 'Desconhecida')}\n"
-                f"📊 Score: {n.score:.2f}\n"
-                f"🔍 Conteúdo:\n{n.node.text[:1000]}..."
-                for n in filtered_nodes
-            )
-            
-            st.write("Gerando resposta...")
-            full_prompt = f"""Você é um especialista em IHC (Interação Humano-Computador) com vasta experiência acadêmica e prática.
+CHAT_RETENTION_DAYS = 30
+HISTORY_TURNS = 6  # mensagens anteriores enviadas como contexto da conversa
+MAX_CHUNK_CHARS = 1500
+MAX_TITLE_CHARS = 50
 
-            [INSTRUÇÕES]
-            1. Analise cuidadosamente a pergunta e o contexto fornecido.
-            2. Se o contexto contiver informações relevantes para a pergunta, baseie sua resposta principalmente nessas informações.
-            3. Se o contexto for insuficiente ou não abordar diretamente a pergunta, forneça uma resposta baseada em seu conhecimento geral de IHC, sem mencionar a ausência de informações no contexto.
-            4. Não faça referências diretas aos \"textos fornecidos\" ou \"artigos\" na sua resposta.
-            
-            [FORMATO]
-            - Use português brasileiro formal
-            - Mantenha termos técnicos consolidados em inglês quando apropriado
-            - Estruture sua resposta em parágrafos claros e concisos
-            - Inclua exemplos práticos quando relevante
-            - Apresente diferentes perspectivas quando apropriado
-            
-            [CONTEXTO]
-            {context}
-            
-            Pergunta: {prompt}
-            """
-            response = generate_response_with_gemini(full_prompt)
-            
-            if response:
-                response = response.replace('[PERGUNTA]', '').replace('[RESPOSTA]', '').strip()
-                
-                # Adicionar resposta ao estado
-                new_response = {
-                    "role": "assistant", 
-                    "content": response,
-                    "timestamp": get_brasilia_time(),
-                    "saved": False
-                }
-                messages.append(new_response)
-                
-                with st.chat_message("assistant"):
-                    st.write(response)
-                
-                # Salvar chat e mensagens no Firestore
-                save_chat_to_firestore(firestore_db, chat_id, messages)
-            
-            status.update(label="Resposta gerada!", state="complete", expanded=True)
+ARTICLE_PATTERN = re.compile(r"artigo:\s*[\"'](.+?)[\"']", re.IGNORECASE)
 
-def save_chat_to_firestore(firestore_db, chat_id, messages):
-    """
-    Salva o chat e suas mensagens no Firestore
-    
-    Args:
-        firestore_db: Cliente Firestore
-        chat_id: ID do chat
-        messages: Lista de mensagens
-    """
-    if not chat_id or "chats" not in st.session_state or chat_id not in st.session_state.chats:
+SYSTEM_INSTRUCTION = """Você é um especialista em IHC (Interação Humano-Computador) com vasta experiência acadêmica e prática.
+
+[INSTRUÇÕES]
+1. Analise cuidadosamente a pergunta, o histórico da conversa e o contexto fornecido.
+2. Se o contexto contiver informações relevantes para a pergunta, baseie sua resposta principalmente nessas informações.
+3. Se o contexto for insuficiente ou não abordar diretamente a pergunta, responda com base em seu conhecimento geral de IHC, sem mencionar a ausência de informações no contexto.
+4. Não faça referências diretas aos "textos fornecidos", "trechos" ou "artigos" na sua resposta.
+5. Se a pergunta não tiver relação com IHC, explique educadamente que você é especializado em IHC.
+
+[FORMATO]
+- Use português brasileiro formal
+- Mantenha termos técnicos consolidados em inglês quando apropriado
+- Estruture a resposta em parágrafos claros e concisos, usando listas e Markdown quando ajudarem a leitura
+- Inclua exemplos práticos quando relevante
+- Apresente diferentes perspectivas quando apropriado"""
+
+EXAMPLE_QUESTIONS = [
+    ("Heurísticas de Nielsen", "O que são as heurísticas de Nielsen?"),
+    ("Testes de usabilidade", "Como funciona a avaliação de usabilidade com usuários?"),
+    ("Acessibilidade na web", "Quais cuidados de acessibilidade devo ter em interfaces web?"),
+]
+
+AVATARS = {"user": ":material/person:", "assistant": ":material/smart_toy:"}
+
+
+def build_prompt(question, chunks, history):
+    context = "\n\n".join(
+        f"[Fonte: {c.file_name} | relevância {c.score:.2f}]\n{c.text[:MAX_CHUNK_CHARS]}"
+        for c in chunks
+    ) or "(nenhum trecho relevante encontrado)"
+
+    recent = history[-HISTORY_TURNS:]
+    conversation = "\n".join(
+        f"{'Usuário' if m['role'] == 'user' else 'Assistente'}: {m['content']}" for m in recent
+    ) or "(início da conversa)"
+
+    return f"""[CONTEXTO]
+{context}
+
+[HISTÓRICO DA CONVERSA]
+{conversation}
+
+[PERGUNTA]
+{question}"""
+
+
+def make_chat_title(prompt):
+    title = " ".join(prompt.split())
+    if len(title) > MAX_TITLE_CHARS:
+        title = title[: MAX_TITLE_CHARS - 3].rstrip() + "..."
+    return title
+
+
+def render_sources(sources):
+    if not sources:
         return
-    
-    # Atualizar timestamp do chat
-    now = get_brasilia_time()
-    chat_data = {
-        "updated_at": now,
+    with st.expander(f"Fontes consultadas ({len(sources)})", icon=":material/menu_book:"):
+        for name in sources:
+            st.markdown(f"- {name.removesuffix('.txt')}")
+
+
+def render_message(message):
+    with st.chat_message(message["role"], avatar=AVATARS[message["role"]]):
+        st.markdown(message["content"])
+        if message["role"] == "assistant":
+            render_sources(message.get("sources"))
+
+
+def show_chat_interface(retriever, firestore_db, user_id):
+    """Exibe a interface principal do chatbot."""
+    messages = st.session_state.messages
+
+    if not messages:
+        st.markdown("### Olá! Como posso ajudar nos seus estudos de IHC?")
+        st.caption(
+            "As respostas são baseadas em um acervo de artigos científicos da área. "
+            'Para perguntar sobre um artigo específico, use: artigo: "nome do artigo".'
+        )
+        cols = st.columns(len(EXAMPLE_QUESTIONS))
+        for col, (label, question) in zip(cols, EXAMPLE_QUESTIONS):
+            if col.button(label, help=question, use_container_width=True):
+                st.session_state.pending_prompt = question
+                st.rerun()
+
+    for message in messages:
+        render_message(message)
+
+    prompt = st.chat_input("Faça uma pergunta sobre IHC")
+    prompt = prompt or st.session_state.pop("pending_prompt", None)
+    if not prompt:
+        return
+
+    if retriever is None:
+        st.error("A base de conhecimento não está disponível no momento. Tente novamente mais tarde.")
+        return
+
+    user_message = {"role": "user", "content": prompt, "timestamp": get_brasilia_time()}
+    render_message(user_message)
+
+    with st.chat_message("assistant", avatar=AVATARS["assistant"]):
+        with st.spinner("Buscando informações relevantes..."):
+            file_name = None
+            match = ARTICLE_PATTERN.search(prompt)
+            if match:
+                file_name = retriever.find_file(match.group(1))
+                if file_name is None:
+                    st.warning(f'Artigo "{match.group(1)}" não encontrado. Buscando em todo o acervo.')
+            if file_name:
+                chunks = retriever.retrieve(prompt, top_k=10, min_score=0.0, file_name=file_name)
+            else:
+                chunks = retriever.retrieve(prompt)
+
+        full_prompt = build_prompt(prompt, chunks, messages)
+        try:
+            response = st.write_stream(stream_response(full_prompt, SYSTEM_INSTRUCTION))
+        except GeminiError as e:
+            st.error(e.user_message)
+            return
+
+        if isinstance(response, list):
+            response = "".join(str(part) for part in response)
+        response = (response or "").strip()
+        if not response:
+            st.error("O modelo não retornou uma resposta. Tente reformular a pergunta.")
+            return
+
+        sources = list(dict.fromkeys(c.file_name for c in chunks))
+        render_sources(sources)
+
+    assistant_message = {
+        "role": "assistant",
+        "content": response,
+        "sources": sources,
+        "timestamp": get_brasilia_time(),
     }
-    
-    # Atualizar documento principal do chat
+
+    # O chat só é criado no Firestore quando a primeira pergunta é respondida
+    if not st.session_state.get("current_chat_id"):
+        title = make_chat_title(prompt)
+        chat_id = create_new_chat_in_firestore(firestore_db, user_id, title)
+        st.session_state.current_chat_id = chat_id
+        st.session_state.chats = {chat_id: {"title": title}, **st.session_state.get("chats", {})}
+
+    messages.extend([user_message, assistant_message])
+    save_messages_to_firestore(
+        firestore_db, st.session_state.current_chat_id, messages, start=len(messages) - 2
+    )
+    st.rerun()
+
+
+def save_messages_to_firestore(firestore_db, chat_id, messages, start=0):
+    """Salva as mensagens a partir do índice `start` e atualiza a data do chat."""
+    now = get_brasilia_time()
     chat_ref = firestore_db.collection("chats").document(chat_id)
-    chat_ref.update(chat_data)
-    
-    # Adicionar mensagens não salvas à subcoleção
-    for idx, msg in enumerate(messages):
-        if not msg.get("saved", False):  # Apenas salva mensagens não salvas anteriormente
-            msg_data = {
-                "role": msg["role"],
-                "content": msg["content"],
-                "timestamp": msg.get("timestamp", now),
-                "order": idx  # Para manter a ordem das mensagens
-            }
-            chat_ref.collection("messages").add(msg_data)
-            msg["saved"] = True  # Marca como salva
+    batch = firestore_db.batch()
+    for order, msg in enumerate(messages[start:], start=start):
+        data = {
+            "role": msg["role"],
+            "content": msg["content"],
+            "timestamp": msg.get("timestamp", now),
+            "order": order,
+        }
+        if msg.get("sources"):
+            data["sources"] = msg["sources"]
+        batch.set(chat_ref.collection("messages").document(), data)
+    batch.update(chat_ref, {"updated_at": now, "expiry_date": now + timedelta(days=CHAT_RETENTION_DAYS)})
+    batch.commit()
+
 
 def load_chat_messages_from_firestore(firestore_db, chat_id):
-    """
-    Carrega as mensagens de um chat do Firestore
-    
-    Args:
-        firestore_db: Cliente Firestore
-        chat_id: ID do chat
-        
-    Returns:
-        Lista de mensagens ordenadas
-    """
-    messages = []
-    
+    """Carrega as mensagens de um chat, em ordem."""
     if not chat_id:
-        return messages
-    
-    # Referência para a coleção de mensagens do chat
-    message_refs = firestore_db.collection("chats").document(chat_id) \
-                     .collection("messages") \
-                     .order_by("order") \
-                     .stream()
-    
-    # Converter documentos para o formato esperado
-    for msg in message_refs:
-        msg_data = msg.to_dict()
-        messages.append({
-            "role": msg_data["role"],
-            "content": msg_data["content"],
-            "timestamp": msg_data.get("timestamp", get_brasilia_time()),
-            "saved": True  # Marcar como já salva no Firestore
-        })
-    
+        return []
+    refs = (
+        firestore_db.collection("chats")
+        .document(chat_id)
+        .collection("messages")
+        .order_by("order")
+        .stream()
+    )
+    messages = []
+    for ref in refs:
+        data = ref.to_dict()
+        messages.append(
+            {
+                "role": data["role"],
+                "content": data["content"],
+                "sources": data.get("sources", []),
+                "timestamp": data.get("timestamp"),
+            }
+        )
     return messages
 
+
 def create_new_chat_in_firestore(firestore_db, user_id, title):
-    """
-    Cria um novo chat no Firestore
-    
-    Args:
-        firestore_db: Cliente Firestore
-        user_id: ID do usuário
-        title: Título do chat
-        
-    Returns:
-        ID do chat criado
-    """
     now = get_brasilia_time()
-    
-    # Dados do novo chat
-    chat_data = {
-        "user_id": user_id,
-        "title": title,
-        "created_at": now,
-        "updated_at": now,
-        "expiry_date": now + timedelta(days=30)  # Define data de expiração para 30 dias
-    }
-    
-    # Adicionar documento à coleção de chats
     chat_ref = firestore_db.collection("chats").document()
-    chat_ref.set(chat_data)
-    
+    chat_ref.set(
+        {
+            "user_id": user_id,
+            "title": title,
+            "created_at": now,
+            "updated_at": now,
+            "expiry_date": now + timedelta(days=CHAT_RETENTION_DAYS),
+        }
+    )
     return chat_ref.id
 
-def list_user_chats_from_firestore(firestore_db, user_id):
-    """
-    Lista todos os chats de um usuário
-    
-    Args:
-        firestore_db: Cliente Firestore
-        user_id: ID do usuário
-        
-    Returns:
-        Dicionário de chats com ID como chave
-    """
-    chats = {}
-    
-    # Consultar chats do usuário
-    chat_query = firestore_db.collection("chats").where("user_id", "==", user_id)
-    chat_query = chat_query.order_by("updated_at", direction="DESCENDING")
-    chat_refs = chat_query.stream()
-    
-    # Converter para dicionário
-    for chat in chat_refs:
-        chat_data = chat.to_dict()
-        chats[chat.id] = chat_data
-    
-    return chats
 
-def cleanup_old_chats(firestore_db, days=30):
-    """
-    Remove chats e mensagens mais antigos que o número especificado de dias
-    
-    Args:
-        firestore_db: Cliente Firestore
-        days: Número de dias para manter os chats (padrão: 30)
-    """
-    now = get_brasilia_time()
-    cutoff_date = now - timedelta(days=days)
-    
-    # Encontrar chats expirados
-    expired_chats = firestore_db.collection("chats") \
-                      .where("updated_at", "<", cutoff_date) \
-                      .stream()
-    
-    batch_size = 0
-    batch = firestore_db.batch()
-    
-    for chat in expired_chats:
-        chat_ref = firestore_db.collection("chats").document(chat.id)
-        
-        # Excluir todas as mensagens primeiro
-        messages = chat_ref.collection("messages").stream()
-        for msg in messages:
-            msg_ref = chat_ref.collection("messages").document(msg.id)
-            batch.delete(msg_ref)
-            batch_size += 1
-            
-            # Enviar batch quando atingir limite (500 é o máximo para firestore)
-            if batch_size >= 450:
+def list_user_chats_from_firestore(firestore_db, user_id, limit=50):
+    """Lista os chats do usuário, do mais recente para o mais antigo."""
+    query = (
+        firestore_db.collection("chats")
+        .where("user_id", "==", user_id)
+        .order_by("updated_at", direction="DESCENDING")
+        .limit(limit)
+    )
+    return {chat.id: chat.to_dict() for chat in query.stream()}
+
+
+def delete_chat_from_firestore(firestore_db, chat_id):
+    chat_ref = firestore_db.collection("chats").document(chat_id)
+    _delete_chats(firestore_db, [chat_ref])
+
+
+def cleanup_old_chats(firestore_db, days=CHAT_RETENTION_DAYS):
+    """Remove chats (e suas mensagens) sem atividade há mais de `days` dias."""
+    cutoff = get_brasilia_time() - timedelta(days=days)
+    expired = firestore_db.collection("chats").where("updated_at", "<", cutoff).stream()
+    count = _delete_chats(firestore_db, [chat.reference for chat in expired])
+    print(f"Limpeza de chats antigos concluída: {count} chats removidos")
+
+
+def _delete_chats(firestore_db, chat_refs):
+    batch, ops, count = firestore_db.batch(), 0, 0
+    for chat_ref in chat_refs:
+        for msg in chat_ref.collection("messages").stream():
+            batch.delete(msg.reference)
+            ops += 1
+            if ops >= 450:  # o Firestore aceita no máximo 500 operações por batch
                 batch.commit()
-                batch = firestore_db.batch()
-                batch_size = 0
-        
-        # Excluir o documento do chat
+                batch, ops = firestore_db.batch(), 0
         batch.delete(chat_ref)
-        batch_size += 1
-        
-        # Enviar batch quando atingir limite
-        if batch_size >= 450:
+        ops += 1
+        count += 1
+        if ops >= 450:
             batch.commit()
-            batch = firestore_db.batch()
-            batch_size = 0
-    
-    # Enviar batch final se houver operações pendentes
-    if batch_size > 0:
+            batch, ops = firestore_db.batch(), 0
+    if ops:
         batch.commit()
-    
-    print(f"Limpeza de chats antigos concluída: {now}")
+    return count

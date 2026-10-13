@@ -1,6 +1,10 @@
+import logging
+
 import firebase_admin
 from firebase_admin import credentials, firestore
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 def get_firebase_credentials():
     if "FIREBASE_SERVICE_ACCOUNT" in st.secrets:
@@ -24,6 +28,6 @@ def initialize_firebase_admin():
             firebase_admin.initialize_app(cred)
         # Retorna o cliente Firestore
         return firestore.client()
-    except Exception as e:
-        st.error(f"Erro ao inicializar Firebase Admin SDK: {str(e)}")
+    except Exception:
+        logger.exception("Erro ao inicializar o Firebase Admin SDK")
         return None

@@ -1,0 +1,4 @@
+# Dependências apenas para desenvolvimento: gerar o índice e rodar os testes
+-r requirements.txt
+llama-index-core>=0.12
+pytest

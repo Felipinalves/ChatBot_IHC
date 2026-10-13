@@ -1,7 +1,9 @@
 import datetime
-import pytz
+from zoneinfo import ZoneInfo
+
+BRASILIA_TZ = ZoneInfo("America/Sao_Paulo")
+
 
 def get_brasilia_time():
     """Retorna objeto datetime atual no fuso de Brasília."""
-    brasilia_tz = pytz.timezone('America/Sao_Paulo')
-    return datetime.datetime.now(brasilia_tz)
+    return datetime.datetime.now(BRASILIA_TZ)

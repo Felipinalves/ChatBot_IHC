@@ -1,83 +1,64 @@
-import pyrebase
+"""Cliente mínimo da API REST do Firebase Authentication.
+
+Substitui a biblioteca pyrebase4, que não é mais mantida e quebra com o urllib3 2.x.
+Mantém a mesma interface usada pelo app (sign_in..., create_user..., send_password_reset_email).
+"""
+import logging
+
+import requests
 import streamlit as st
+
+logger = logging.getLogger(__name__)
+
+IDENTITY_TOOLKIT_URL = "https://identitytoolkit.googleapis.com/v1/accounts:{}"
+TIMEOUT = 15
+
+
+class FirebaseAuthError(Exception):
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+class FirebaseAuth:
+    def __init__(self, api_key, session=None):
+        self._api_key = api_key
+        self._session = session or requests.Session()
+
+    def _post(self, method, payload):
+        response = self._session.post(
+            IDENTITY_TOOLKIT_URL.format(method),
+            params={"key": self._api_key},
+            json=payload,
+            timeout=TIMEOUT,
+        )
+        data = response.json() if response.content else {}
+        if not response.ok:
+            raise FirebaseAuthError(data.get("error", {}).get("message", f"HTTP_{response.status_code}"))
+        return data
+
+    def sign_in_with_email_and_password(self, email, password):
+        return self._post("signInWithPassword", {"email": email, "password": password, "returnSecureToken": True})
+
+    def create_user_with_email_and_password(self, email, password):
+        return self._post("signUp", {"email": email, "password": password, "returnSecureToken": True})
+
+    def send_password_reset_email(self, email):
+        return self._post("sendOobCode", {"requestType": "PASSWORD_RESET", "email": email})
+
+
+class FirebaseApp:
+    def __init__(self, api_key):
+        self._auth = FirebaseAuth(api_key)
+
+    def auth(self):
+        return self._auth
+
 
 @st.cache_resource(show_spinner=False)
 def initialize_pyrebase():
     try:
-        firebase_config = {
-            "apiKey": st.secrets["FIREBASE"]["apiKey"],
-            "authDomain": st.secrets["FIREBASE"]["authDomain"],
-            "projectId": st.secrets["FIREBASE"]["projectId"],
-            "storageBucket": st.secrets["FIREBASE"]["storageBucket"],
-            "messagingSenderId": st.secrets["FIREBASE"]["messagingSenderId"],
-            "appId": st.secrets["FIREBASE"]["appId"],
-            "databaseURL": st.secrets["FIREBASE"].get("databaseURL", "")  # Usando get para evitar KeyError
-        }
-        firebase = pyrebase.initialize_app(firebase_config)
-        return firebase
-    except Exception as e:
-        st.error(f"Erro ao inicializar Pyrebase: {str(e)}")
+        return FirebaseApp(st.secrets["FIREBASE"]["apiKey"])
+    except Exception:
+        logger.exception("Erro ao inicializar o Firebase Authentication")
         return None
-
-# Exemplo de uso para histórico de chat
-def save_chat_history(db, user_id, message, is_bot=False):
-    """
-    Salva uma mensagem no histórico de chat do usuário no Firestore
-    
-    Args:
-        db: Cliente Firestore
-        user_id: ID do usuário
-        message: Texto da mensagem
-        is_bot: Se a mensagem é do bot (True) ou do usuário (False)
-    """
-    # Referência para a coleção de chats do usuário
-    chat_ref = db.collection("chats").document(user_id)
-    
-    # Verifica se o documento do chat existe
-    chat_doc = chat_ref.get()
-    
-    # Se não existir, cria o documento do chat
-    if not chat_doc.exists:
-        chat_ref.set({
-            "user_id": user_id,
-            "created_at": get_brasilia_time(),
-            "updated_at": get_brasilia_time()
-        })
-    else:
-        # Atualiza o timestamp do último update
-        chat_ref.update({"updated_at": get_brasilia_time()})
-    
-    # Adiciona a mensagem à subcoleção de mensagens
-    chat_ref.collection("messages").add({
-        "sender": "bot" if is_bot else "user",
-        "content": message,
-        "timestamp": get_brasilia_time()
-    })
-
-def get_chat_history(db, user_id, limit=50):
-    """
-    Obtém o histórico de chat do usuário do Firestore
-    
-    Args:
-        db: Cliente Firestore
-        user_id: ID do usuário
-        limit: Número máximo de mensagens a retornar
-        
-    Returns:
-        Uma lista de mensagens ordenadas por timestamp
-    """
-    messages = []
-    
-    # Obtém as mensagens da subcoleção, ordenadas por timestamp
-    message_refs = db.collection("chats").document(user_id) \
-                     .collection("messages") \
-                     .order_by("timestamp") \
-                     .limit(limit) \
-                     .stream()
-    
-    # Converte os documentos para dicionários e adiciona à lista
-    for msg in message_refs:
-        msg_data = msg.to_dict()
-        messages.append(msg_data)
-    
-    return messages

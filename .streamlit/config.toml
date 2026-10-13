@@ -1,0 +1,19 @@
+[theme]
+# Manual da marca UTFPR: logo prioritária sobre fundo branco, cores preto e amarelo (Pantone 7406 C)
+base = "light"
+primaryColor = "#000000"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F6F6F6"
+textColor = "#1A1A1A"
+
+[server]
+# Desliga o monitoramento de arquivos: em produção não há edição de código e o
+# watcher varre os módulos do torch, consumindo CPU à toa
+fileWatcherType = "none"
+runOnSave = false
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false

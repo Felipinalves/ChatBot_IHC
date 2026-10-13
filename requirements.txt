@@ -1,25 +1,16 @@
-# --- Base da aplicação ---
-streamlit>=1.30.0
-google-cloud-firestore>=2.11.0
-schedule>=1.2.0
-pysqlite3-binary
-firebase-admin==6.4.0
-pyrebase4
+# PyTorch somente CPU: evita baixar ~3 GB de bibliotecas CUDA no Streamlit Cloud
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
 
-# --- RAG e embeddings ---
-llama-index>=0.10.28         # Garante acesso ao SentenceSplitter e outras melhorias
-llama-index-vector-stores-chroma
-llama-index-embeddings-huggingface
-chromadb>=0.4.24             # Compatível com persistência e HNSW config
-sentence-transformers>=2.2.2 # Modelo HuggingFace usado nos embeddings
-nltk
-tiktoken
-spacy>=3.7.2
-sentence-splitter
-hf_xet
+# --- Base da aplicação ---
+streamlit>=1.45.0
+firebase-admin>=6.4.0
+requests
+tzdata
+
+# --- RAG (o índice já vem pré-calculado em rag/index) ---
+numpy
+sentence-transformers>=3.0.0
 
 # --- LLM: Google Gemini ---
-google-generativeai>=0.3.2   # Usado para chamar o Gemini 
-
-# --- Outros ---
-protobuf<4.0.0               # Evita conflitos com Google API
+google-genai>=1.0.0
