@@ -7,7 +7,7 @@ import pytest
 from auth.auth_utils import login_with_email, register_user
 from auth.pyrebase_auth import FirebaseAuth
 from chat import chat_interface as ci
-from rag.gemini_integration import redact, to_user_error
+from rag.gemini_integration import GeminiError, redact, stream_with_fallback, to_user_error
 from rag.rag_engine import Retriever
 from tests.fakes import FakeAuth, FakeFirestore
 from utils.time_utils import get_brasilia_time
@@ -60,11 +60,78 @@ def test_api_key_is_never_shown_to_the_user():
     assert LEAKED_KEY not in redact(str(exc))
 
 
-@pytest.mark.parametrize("code,retryable", [(429, True), (503, True), (404, False), (400, False)])
-def test_error_mapping(code, retryable):
+@pytest.mark.parametrize(
+    "code,retryable,fallback",
+    [(429, False, True), (503, True, True), (404, False, True), (400, False, False), (403, False, False)],
+)
+def test_error_mapping(code, retryable, fallback):
     exc = Exception("erro")
     exc.code = code
-    assert to_user_error(exc).retryable is retryable
+    error = to_user_error(exc)
+    assert (error.retryable, error.fallback) == (retryable, fallback)
+
+
+def test_aq_keys_are_redacted():
+    assert "AQ.Ab8RN6" not in redact("key=AQ.Ab8RN6Kx_1234567890abcdefghij")
+
+
+class ApiError(Exception):
+    def __init__(self, code):
+        super().__init__(f"{code} erro")
+        self.code = code
+
+
+class FakeGeminiClient:
+    """Cada modelo devolve uma lista de resultados por tentativa: código de erro ou texto."""
+
+    def __init__(self, script):
+        self.script = {m: list(r) for m, r in script.items()}
+        self.calls = []
+        self.models = self
+
+    def generate_content_stream(self, model, contents, config):
+        self.calls.append(model)
+        result = self.script[model].pop(0)
+        if isinstance(result, int):
+            raise ApiError(result)
+        return [SimpleNamespace(text=part) for part in result]
+
+
+def run_stream(client, models):
+    return "".join(stream_with_fallback(client, models, "p", None, sleep=lambda s: None))
+
+
+def test_overloaded_model_falls_back_to_next():
+    client = FakeGeminiClient({"a": [503, 503], "b": [["resposta ", "ok"]]})
+    assert run_stream(client, ["a", "b"]) == "resposta ok"
+    assert client.calls == ["a", "a", "b"]
+
+
+def test_transient_error_is_retried_on_same_model():
+    client = FakeGeminiClient({"a": [503, ["ok"]], "b": []})
+    assert run_stream(client, ["a", "b"]) == "ok"
+    assert client.calls == ["a", "a"]
+
+
+def test_quota_error_skips_retry_and_uses_fallback():
+    client = FakeGeminiClient({"a": [429], "b": [["ok"]]})
+    assert run_stream(client, ["a", "b"]) == "ok"
+    assert client.calls == ["a", "b"]
+
+
+def test_permission_error_does_not_fall_back():
+    client = FakeGeminiClient({"a": [403], "b": [["ok"]]})
+    with pytest.raises(GeminiError) as info:
+        run_stream(client, ["a", "b"])
+    assert "chave da API" in info.value.user_message
+    assert client.calls == ["a"]
+
+
+def test_all_models_overloaded_raises_friendly_error():
+    client = FakeGeminiClient({"a": [503, 503], "b": [503, 503]})
+    with pytest.raises(GeminiError) as info:
+        run_stream(client, ["a", "b"])
+    assert "sobrecarregado" in info.value.user_message
 
 
 def test_build_prompt_includes_context_history_and_question():

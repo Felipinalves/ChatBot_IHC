@@ -23,6 +23,8 @@ Para perguntar sobre um artigo específico: `artigo: "nome do artigo"`.
 ```toml
 GEMINI_API_KEY = "..."           # chave do Google AI Studio
 GEMINI_MODEL = "gemini-3.1-flash-lite"  # opcional
+# opcional: modelos reserva, usados se o principal estiver sobrecarregado (503) ou sem cota (429)
+GEMINI_FALLBACK_MODELS = "gemini-2.5-flash-lite, gemini-2.5-flash"
 
 [FIREBASE]
 apiKey = "..."
